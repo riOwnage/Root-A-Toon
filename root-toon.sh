@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 function kill_recurse() {
     cpids=`pgrep -P $1|xargs`
@@ -14,7 +14,7 @@ function kill_recurse() {
 #cleanup earlier bad runs
 rm -f /tmp/pipe.in
 rm -f /tmp/pipe.out
-/sbin/iptables -D FORWARD -p tcp --dport 443 -j DROP 2>/dev/null
+/usr/sbin/iptables -D FORWARD -p tcp --dport 443 -j DROP 2>/dev/null
 killall -9 nc 2>/dev/null
 killall -9 cat 2>/dev/null
 
@@ -36,11 +36,11 @@ else
 fi
 
 echo "Blocking all HTTPS (and therefore Toon VPN). Reboot your toon now. And after that press the 'software' button on your Toon."
-/sbin/iptables -I FORWARD -p tcp --dport 443 -j DROP
+/usr/sbin/iptables -I FORWARD -p tcp --dport 443 -j DROP
 
-OUTPUT=`/usr/sbin/tcpdump -n -i any port 31080 -c 1 2>/dev/null` || exit "tcpdump failed"
-TOONIP=`echo $OUTPUT | cut -d\  -f3 | cut -d\. -f1,2,3,4`
-IP=`echo $OUTPUT | cut -d\  -f5 | cut -d\. -f1,2,3,4`
+OUTPUT=`sudo /usr/bin/tcpdump -n -i any port 31080 -c 1 2>/dev/null` || exit "tcpdump failed"
+TOONIP=$(echo "$OUTPUT" | sed -nE 's/.*IP ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+ >.*/\1/p')
+IP=$(echo "$OUTPUT" | sed -nE 's/.*> ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+.*/\1/p')
 
 [ -f /tmp/pipe.in ] || /usr/bin/mkfifo /tmp/pipe.in
 [ -f /tmp/pipe.out ] || /usr/bin/mkfifo /tmp/pipe.out
@@ -48,8 +48,8 @@ IP=`echo $OUTPUT | cut -d\  -f5 | cut -d\. -f1,2,3,4`
 echo "The Toon from $TOONIP is connecting to servicecenter IP: $IP"
 echo "Let's have some fun!"
 
-/sbin/ip addr add 1.0.0.1/32 dev lo 2>/dev/null
-/sbin/ip addr add $IP/32 dev lo 2>/dev/null
+/usr/sbin/ip addr add 1.0.0.1/32 dev lo 2>/dev/null
+/usr/sbin/ip addr add $IP/32 dev lo 2>/dev/null
 
 
 RESPONSE='HTTP/1.1 200 OK\n\n
@@ -70,11 +70,12 @@ DONE=false
 
 while ! $DONE 
 do
-cat /tmp/pipe.out | nc -q 0 -Nl 31080 | tee /tmp/pipe.in &
+cat /tmp/pipe.out | nc -q 0 -l -p 31080 | tee /tmp/pipe.in &
 
 while read line
 do
   echo $LINE
+  echo $line
   if [[ $line = *"action class"* ]]
   then
     COMMONNAME=`echo $line | sed 's/.* commonname="\(.*\)".*/\1/'`
@@ -85,7 +86,7 @@ do
   if [[ $line = *"<u:GetUpgrade"* ]]
   then
     echo "Received valid update request. Sending the reponse for the upgrade request and starting payload process in background"
-    timeout 80 bash -c "echo '$PAYLOAD' | nc -q 2 -Nl 1.0.0.1 80 " &
+    timeout 80 bash -c "echo '$PAYLOAD' | nc -q 2 -l -s 1.0.0.1 -p 80 " &
     PAYLOAD_PID=$!
     echo -e $TOSEND > /tmp/pipe.out
     DONE=true
@@ -111,7 +112,7 @@ ip addr del $IP/32 dev lo
 ip addr del 1.0.0.1/32 dev lo
 rm -f /tmp/pipe.in
 rm -f /tmp/pipe.out
-/sbin/iptables -D FORWARD -p tcp --dport 443 -j DROP
+/usr/sbin/iptables -D FORWARD -p tcp --dport 443 -j DROP
 
 if [ $SUCCESS -ne 0 ] 
 then
@@ -138,4 +139,4 @@ do
 	echo "$CURLOUTPUT"
 done
 ssh-keygen -f "/root/.ssh/known_hosts" -R $TOONIP
-ssh -o StrictHostKeyChecking=no root@$TOONIP
+ssh -o StrictHostKeyChecking=no -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa root@$TOONIP
